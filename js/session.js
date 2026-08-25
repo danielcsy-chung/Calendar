@@ -88,8 +88,8 @@ const Session = {
     sesSel.addEventListener('change', () => { Session.activeId = sesSel.value; App.render(); });
 
     const running = !!ses.startedAt && !ses.endedAt;
-    const startBtn = el('button.btn' + (running ? '.danger' : '.primary'), {
-      text: running ? 'End session' : (ses.endedAt ? 'Reopen' : 'Start session'),
+    const startLabel = running ? 'End session' : (ses.endedAt ? 'Reopen session' : 'Start session');
+    const startBtn = el('button.btn' + (running ? '.danger' : '.go'), {
       onclick: () => {
         if(running){
           confirmDialog('End this session?', 'Time already logged is kept. You can reopen it later.', 'End session', () => {
@@ -103,7 +103,10 @@ const Session = {
           toast('Session started. The red line is now.');
         }
       }
-    });
+    }, [
+      running ? null : el('i.tri'),
+      el('span', { text: startLabel })
+    ]);
 
     page.appendChild(el('div.study-head', {}, [
       titleIn,
@@ -394,13 +397,14 @@ const Session = {
       offset: 0, dur: 30, subtasks: [], breakKind: 'coffee', todoId: null
     }, seed || {});
 
-    const typeSel = el('select', {}, [
-      el('option', { value: 'task', text: 'Work block' }),
-      el('option', { value: 'break', text: 'Break' })
-    ]);
-    typeSel.value = b.type;
+    let blockType = b.type;
+    const typeChips = chipset([
+      { value: 'task', label: 'Work block' },
+      { value: 'break', label: 'Break' }
+    ], blockType, v => { blockType = v; syncType(); });
 
-    const subj = subjectSelect(b.subjectId);
+    let subjectId = b.subjectId || '';
+    const subj = subjectChips(subjectId, v => { subjectId = v; });
     const title = textInput(b.title, 'What are you doing in this block?');
     const detail = el('textarea', { placeholder: 'Detail — pages, questions, what "done" looks like' });
     detail.value = b.detail || '';
@@ -420,7 +424,7 @@ const Session = {
       const t = Store.state.todos.find(x => x.id === todoSel.value);
       if(!t) return;
       title.value = t.title;
-      if(t.subjectId) subj.value = t.subjectId;
+      if(t.subjectId){ subjectId = t.subjectId; subj.set(subjectId); }
       if(t.link) links.value = (links.value ? links.value + '\n' : '') + t.link;
       if(t.desc && !detail.value) detail.value = t.desc;
     });
@@ -447,11 +451,11 @@ const Session = {
       field('Subject', subj),
       field('From your list', todoSel)
     ]);
-    const syncType = () => { taskOnly.style.display = typeSel.value === 'task' ? '' : 'none'; };
-    typeSel.addEventListener('change', syncType); syncType();
+    const syncType = () => { taskOnly.style.display = blockType === 'task' ? '' : 'none'; };
+    syncType();
 
     const body = el('div', {}, [
-      field('Type', typeSel),
+      field('Type', typeChips),
       taskOnly,
       field('Title', title),
       el('div.row', {}, [field('Starts at', startIn), field('Minutes', durIn)]),
@@ -467,8 +471,8 @@ const Session = {
       if(!Session.fits(ses, offset, dur, b.id)){
         toast('That overlaps another block or runs past the end of the session.', true); return;
       }
-      b.type = typeSel.value;
-      b.subjectId = b.type === 'task' ? (subj.value || null) : null;
+      b.type = blockType;
+      b.subjectId = b.type === 'task' ? (subjectId || null) : null;
       b.todoId = todoSel.value || null;
       b.title = title.value.trim();
       b.detail = detail.value.trim();
@@ -495,8 +499,8 @@ const Session = {
     modal({ title: isNew ? 'New block' : 'Edit block', body, actions, wide: true });
   },
 
-  newDialog(){
-    const date = el('input', { type: 'date', value: dateKey() });
+  newDialog(forDate){
+    const date = el('input', { type: 'date', value: forDate || dateKey() });
     const title = textInput('', 'e.g. Friday evening — Physics IA');
     const hours = el('input', { type: 'number', min: '1', max: '10', value: Store.state.settings.defaultHours });
     const start = el('input', { type: 'time', value: '16:00' });
@@ -574,11 +578,12 @@ const Session = {
       return;
     }
     try{
-      const w = await documentPictureInPicture.requestWindow({ width: 300, height: 300 });
+      const w = await documentPictureInPicture.requestWindow({ width: 300, height: 360 });
       const style = w.document.createElement('style');
       style.textContent = `
         body{font-family:'Space Grotesk',system-ui,sans-serif;background:#0e1218;color:#e6ebf2;margin:0;padding:12px}
-        .big{font-size:30px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;color:#f2a33c;line-height:1.1}
+        .big{font-size:30px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,monospace;color:#f2a33c;line-height:1.15;letter-spacing:-.02em}
+        .big.up{color:#3fb984;font-size:24px;margin-bottom:6px}
         .k{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:#5d6878;font-weight:600}
         .r{display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #252d3b}
         .r b{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600}
@@ -609,14 +614,18 @@ const Session = {
     const left = cur ? (cur.offset + cur.dur - off) : 0;
     const openTodos = Store.openTodos().length;
     const subs = cur && cur.subtasks ? cur.subtasks.filter(s => !s.done).slice(0,3) : [];
+    const next = ses.blocks.filter(b => off !== null && b.offset >= off).sort((a,b) => a.offset - b.offset)[0];
     root.innerHTML =
-      '<div class="now"><div class="k">' + (cur ? (cur.type === 'break' ? 'On a break' : 'Working on') : 'Not in a block') + '</div>' +
-      '<div class="big">' + (cur ? fmtDur(Math.max(0,left)) : '--') + '</div>' +
+      '<div class="now"><div class="k">' +
+        (cur ? (cur.type === 'break' ? 'Break ends in' : 'Task ends in') : 'Not in a block') + '</div>' +
+      '<div class="big">' + (cur ? fmtClock(Math.max(0, left) * 60) : '--:--:--') + '</div>' +
       '<div class="t">' + (cur ? escapeHtml(cur.title) : (ses.endedAt ? 'Session ended' : 'Unscheduled time')) + '</div>' +
       (subs.length ? '<ul>' + subs.map(s => '<li>' + escapeHtml(s.text) + '</li>').join('') + '</ul>' : '') +
       '</div>' +
-      '<div class="r"><span>Studied</span><b>' + fmtDur(studied) + '</b></div>' +
+      '<div class="k" style="margin-top:2px">Total studied</div>' +
+      '<div class="big up">' + fmtClock(studied * 60) + '</div>' +
       '<div class="r"><span>To go</span><b>' + fmtDur(Math.max(0, planned - studied)) + '</b></div>' +
+      '<div class="r"><span>Up next</span><b>' + (next ? escapeHtml(next.title).slice(0,18) : '—') + '</b></div>' +
       '<div class="r"><span>Tasks open</span><b>' + openTodos + '</b></div>';
   }
 };

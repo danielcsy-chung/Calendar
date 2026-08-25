@@ -31,49 +31,54 @@ const Todos = {
     const isNew = !todo;
     const t = todo || { id: uid('td'), subjectId: '', title: '', link: '', desc: '', due: null, done: false, createdAt: Date.now() };
 
-    const subj = subjectSelect(t.subjectId);
+    let subjectId = t.subjectId || '';
+    const subj = subjectChips(subjectId, v => { subjectId = v; fillPresets(); });
+
     const title = textInput(t.title, 'e.g. Finish Paper 2 practice questions');
     const link = textInput(t.link, 'https://…');
     const desc = el('textarea', { placeholder: 'Anything you need to remember about it' });
     desc.value = t.desc || '';
 
-    const dueSel = el('select');
-    const dateIn = el('input', { type: 'date', value: t.due || '', style: { display: 'none', marginTop: '6px' } });
+    /* due date: tappable presets, with the date input hidden until "Pick a date" */
+    const dateIn = el('input', { type: 'date', value: t.due || '', style: { display: 'none', marginTop: '8px', maxWidth: '190px' } });
+    let dueKey = 'none', presets = [], firstFill = true;
+
+    const dueChips = chipset([], 'none', k => {
+      dueKey = k;
+      const show = k === 'custom';
+      dateIn.style.display = show ? 'block' : 'none';
+      if(show && !dateIn.value) dateIn.value = dateKey();
+    });
 
     const fillPresets = () => {
-      clear(dueSel);
-      const ps = Todos.duePresets(subj.value);
-      ps.forEach(p => dueSel.appendChild(el('option', { value: p.key, text: p.label })));
-      if(t.due){
-        const hit = ps.find(p => p.date === t.due && p.key !== 'none');
-        dueSel.value = hit ? hit.key : 'custom';
-        dateIn.style.display = hit ? 'none' : 'block';
-      } else dueSel.value = 'none';
-      dueSel._presets = ps;
+      presets = Todos.duePresets(subjectId);
+      dueChips.setOptions(presets.map(p => ({ value: p.key, label: p.label })));
+      if(firstFill && t.due){
+        const hit = presets.find(p => p.date === t.due && p.key !== 'none');
+        dueKey = hit ? hit.key : 'custom';
+      }
+      firstFill = false;
+      dueChips.set(dueKey);
+      dateIn.style.display = dueKey === 'custom' ? 'block' : 'none';
     };
     fillPresets();
-    subj.addEventListener('change', fillPresets);
-    dueSel.addEventListener('change', () => {
-      dateIn.style.display = dueSel.value === 'custom' ? 'block' : 'none';
-      if(dueSel.value === 'custom' && !dateIn.value) dateIn.value = dateKey();
-    });
 
     const body = el('div', {}, [
       field('Subject', subj),
       field('Task', title),
-      field('Due', el('div', {}, [dueSel, dateIn])),
+      field('Due', el('div', {}, [dueChips, dateIn])),
       field('Link (optional)', link),
       field('Notes (optional)', desc)
     ]);
 
     const save = close => {
       if(!title.value.trim()){ toast('Give the task a name first.', true); return; }
-      t.subjectId = subj.value || null;
+      t.subjectId = subjectId || null;
       t.title = title.value.trim();
       t.link = link.value.trim();
       t.desc = desc.value.trim();
-      const p = (dueSel._presets || []).find(x => x.key === dueSel.value);
-      t.due = dueSel.value === 'custom' ? (dateIn.value || null) : (p ? p.date : null);
+      const p = presets.find(x => x.key === dueKey);
+      t.due = dueKey === 'custom' ? (dateIn.value || null) : (p ? p.date : null);
       if(isNew) Store.state.todos.push(t);
       Store.save();
       close();

@@ -80,3 +80,76 @@ function subjectSelect(value, allowNone){
   s.value = value || '';
   return s;
 }
+
+/* ------------------------------------------------------------
+   chipset — a row of tappable buttons in place of a <select>
+   options: [{value, label, color?}]
+   The returned node has .get(), .set(v) and .setOptions(list).
+   ------------------------------------------------------------ */
+function chipset(options, value, onChange){
+  const wrap = el('div.chipset');
+  const draw = () => {
+    clear(wrap);
+    options.forEach(o => {
+      const sel = String(o.value) === String(value);
+      const b = el('button.chip-btn' + (sel ? '.sel' : ''), {
+        type: 'button',
+        onclick: () => { value = o.value; draw(); if(onChange) onChange(o.value, o); }
+      }, [
+        o.color ? el('i.dot', { style: { background: o.color } }) : null,
+        el('span', { text: o.label })
+      ]);
+      if(sel && o.color){
+        b.style.background = 'color-mix(in srgb,' + o.color + ' 28%, transparent)';
+        b.style.borderColor = o.color;
+      } else if(sel) b.classList.add('neutral');
+      wrap.appendChild(b);
+    });
+  };
+  draw();
+  wrap.get = () => value;
+  wrap.set = v => { value = v; draw(); };
+  wrap.setOptions = list => { options = list; draw(); };
+  return wrap;
+}
+
+/* subject chips, with an "unassigned" option first */
+function subjectChips(value, onChange, allowNone){
+  const opts = [];
+  if(allowNone !== false) opts.push({ value: '', label: 'None' });
+  Store.state.subjects.forEach(s => opts.push({ value: s.id, label: s.name, color: s.color }));
+  return chipset(opts, value || '', onChange);
+}
+
+/* ------------------------------------------------------------
+   colorPicker — swatch grid plus a manual hex / native picker
+   ------------------------------------------------------------ */
+function colorPicker(value, onChange){
+  value = value || PALETTE[0];
+  const swatches = el('div.swatches');
+  const hex = el('input', { type: 'text', value, maxlength: '7', spellcheck: 'false', style: { width: '96px', flex: 'none', fontFamily: "'JetBrains Mono',monospace" } });
+  const native = el('input', { type: 'color', value, style: { width: '40px', flex: 'none' } });
+
+  const paint = () => swatches.querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.c.toLowerCase() === String(value).toLowerCase()));
+  const set = v => { value = v; hex.value = v; native.value = v; paint(); if(onChange) onChange(v); };
+
+  PALETTE_EXT.forEach(c => swatches.appendChild(
+    el('button.sw', { type: 'button', 'data-c': c, title: c, style: { background: c }, onclick: () => set(c) })));
+
+  hex.addEventListener('change', () => {
+    let v = hex.value.trim();
+    if(v && v[0] !== '#') v = '#' + v;
+    if(/^#[0-9a-fA-F]{6}$/.test(v)) set(v);
+    else { hex.value = value; toast('Use a 6-digit hex code like #5b8def.', true); }
+  });
+  native.addEventListener('input', () => set(native.value));
+
+  paint();
+  return el('div.colorpick', {}, [
+    swatches,
+    el('div', { style: { display: 'flex', gap: '7px', alignItems: 'center', marginTop: '7px' } }, [
+      native, hex, el('span', { style: { fontSize: '11px', color: 'var(--mist-dim)' }, text: 'or type a hex code' })
+    ])
+  ]);
+}
